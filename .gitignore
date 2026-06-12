@@ -1,0 +1,32 @@
+# ---- Keil MDK 编译产物(目标名同名输出目录) ----
+App/MDK-ARM/App/
+Bootloader/MDK-ARM/Bootloader/
+
+# Keil 用户界面状态(纯本机偏好,与构建无关)
+*.uvguix.*
+
+# 编译中间文件(兜底)
+*.o
+*.crf
+*.d
+*.axf
+*.lnp
+*.iex
+*.htm
+*.dep
+*.map
+
+# JLink / 调试日志
+JLink*.log
+*.jlink
+
+# Python
+__pycache__/
+*.pyc
+
+# 本机工具配置
+.claude/
+
+# 系统杂项
+Thumbs.db
+Desktop.ini
