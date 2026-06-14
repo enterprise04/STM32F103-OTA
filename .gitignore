@@ -24,6 +24,10 @@ JLink*.log
 __pycache__/
 *.pyc
 
+# 私钥绝不上传!(签名私钥泄露 = 安全机制失效)
+*.pem
+private_key.pem
+
 # 本机工具配置
 .claude/
 

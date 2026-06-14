@@ -39,6 +39,7 @@ static int flash_from_w25(uint32_t src, uint32_t size, uint32_t expect_crc)
         if (n > sizeof(buf)) {
             n = sizeof(buf);
         }
+        OTA_FEED_WDG();
         W25_Read(src + off, buf, n);
         if (STM_Write(APP_ADDR + off, buf, n) != 0) {
             return -1;
@@ -57,11 +58,13 @@ static int do_backup(uint32_t session)
 
     printf("[Boot] Backing up current App ...\r\n");
     for (off = 0; off < APP_MAX_SIZE; off += W25_SECTOR_SIZE) {
+        OTA_FEED_WDG();
         if (W25_EraseSector(W25_PART_BACKUP + off) != 0) {
             return -1;
         }
     }
     for (off = 0; off < APP_MAX_SIZE; off += 1024U) {
+        OTA_FEED_WDG();
         if (W25_Write(W25_PART_BACKUP + off,
                       (const uint8_t *)(APP_ADDR + off), 1024U) != 0) {
             return -1;

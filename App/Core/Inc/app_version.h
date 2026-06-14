@@ -6,8 +6,8 @@
 /* ====== 全工程唯一需要改版本号的地方,发版前改这里并重新编译 ======
  * 上位机会从 bin 中自动读取版本,推送时无需再传 --version。
  */
-#define APP_VERSION_MAJOR   3
-#define APP_VERSION_MINOR   1
+#define APP_VERSION_MAJOR   10
+#define APP_VERSION_MINOR   5
 
 #define APP_VERSION_WORD    (((uint32_t)APP_VERSION_MAJOR << 16) | (uint32_t)APP_VERSION_MINOR)
 

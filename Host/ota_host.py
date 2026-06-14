@@ -7,8 +7,12 @@
 协议见 Common/ota.h:
     帧:  AA 55 | CMD | SEQ | LEN(2,LE) | DATA | CRC32(4,LE)   CRC 覆盖 CMD..DATA
     应答: 55 AA | STATUS | SEQ
+    START 的 DATA 末尾附 64 字节 ECDSA P-256 签名,设备验签通过才接受固件。
+    需先运行 keygen.py 生成密钥对(私钥签名、公钥编译进固件)。
 """
 import argparse
+import hashlib
+import os
 import struct
 import sys
 import time
@@ -23,6 +27,7 @@ CMD_START, CMD_DATA, CMD_END = 0x01, 0x02, 0x03
 ST_NAMES = {
     0x00: "OK", 0x01: "帧CRC错", 0x02: "序号错",
     0x03: "状态/参数非法", 0x04: "Flash操作失败", 0x05: "固件CRC校验失败",
+    0x06: "签名验证失败(固件非法或被篡改)",
 }
 CHUNK = 1024
 RETRY = 5
@@ -37,6 +42,23 @@ def embedded_version(fw: bytes):
     if idx < 0 or idx + 12 > len(fw):
         return None
     return struct.unpack_from("<I", fw, idx + 8)[0]
+
+
+def sign_firmware(fw: bytes, key_path: str) -> bytes:
+    """用 ECDSA P-256 私钥对固件 SHA-256 签名,返回 64 字节裸签名(r||s)"""
+    try:
+        from ecdsa import SigningKey
+        from ecdsa.util import sigencode_string
+    except ImportError:
+        sys.exit("缺少 ecdsa 库,先执行: pip install ecdsa")
+    if not os.path.exists(key_path):
+        sys.exit(f"找不到私钥 {key_path},先运行: python keygen.py 生成密钥对")
+    with open(key_path) as f:
+        sk = SigningKey.from_pem(f.read())
+    digest = hashlib.sha256(fw).digest()
+    sig = sk.sign_digest(digest, sigencode=sigencode_string)
+    assert len(sig) == 64
+    return sig
 
 
 def build_frame(cmd: int, seq: int, data: bytes = b"") -> bytes:
@@ -76,6 +98,9 @@ def main():
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--version", default=None,
                     help="固件版本(后备)。bin 内嵌版本信息块优先,通常无需此参数")
+    ap.add_argument("--key", default="private_key.pem", help="ECDSA 私钥路径")
+    ap.add_argument("--tamper", action="store_true",
+                    help="演示用:故意破坏签名,板端应拒绝该固件")
     args = ap.parse_args()
 
     with open(args.binfile, "rb") as f:
@@ -107,9 +132,13 @@ def main():
     ser = serial.Serial(args.port, args.baud, timeout=0.05)
     ser.reset_input_buffer()        # 丢弃板端开机的调试打印
 
-    # 1. START:固件大小 + 整包CRC + 版本
-    print("握手 ...", end="", flush=True)
-    meta = struct.pack("<III", len(fw), fw_crc, version)
+    # 1. START:固件大小 + 整包CRC + 版本 + 64 字节数字签名
+    sig = sign_firmware(fw, args.key)
+    if args.tamper:
+        sig = bytes([sig[0] ^ 0x01]) + sig[1:]   # 翻转 1 bit 模拟篡改/伪造
+        print("⚠ 已故意破坏签名(--tamper 演示),板端应拒绝")
+    print("握手(含签名) ...", end="", flush=True)
+    meta = struct.pack("<III", len(fw), fw_crc, version) + sig
     if not send_frame(ser, CMD_START, 0, meta):
         sys.exit("\n握手失败:检查板子是否在运行 App、串口助手是否占用了串口")
     print(" OK")

@@ -5,6 +5,9 @@
 #include "w25q64.h"
 #include "crc32.h"
 #include "boot.h"          /* APP_MAX_SIZE */
+#include "sha256.h"
+#include "micro-ecc/uECC.h"
+#include "ecc_pubkey.h"    /* g_ecc_pubkey,由 Host/keygen.py 生成 */
 
 extern UART_HandleTypeDef huart1;
 
@@ -19,6 +22,7 @@ static struct {
     uint32_t version;
     uint32_t offset;        /* 已写入下载区的字节数 */
     uint8_t  next_seq;
+    uint8_t  sig[OTA_SIG_LEN];   /* 本次固件的 ECDSA 签名(START 帧携带) */
 } ctx;
 
 /* 重新武装一次 DMA 空闲接收 */
@@ -67,11 +71,31 @@ static uint32_t download_crc(uint32_t size)
     return crc;
 }
 
+/* 计算 W25Q64 下载区中固件的 SHA-256 */
+static void download_sha256(uint32_t size, uint8_t out[32])
+{
+    static uint8_t tmp[256];
+    sha256_ctx c;
+    uint32_t off = 0, n;
+
+    sha256_init(&c);
+    while (off < size) {
+        n = size - off;
+        if (n > sizeof(tmp)) {
+            n = sizeof(tmp);
+        }
+        W25_Read(W25_PART_DOWNLOAD + off, tmp, n);
+        sha256_update(&c, tmp, n);
+        off += n;
+    }
+    sha256_final(&c, out);
+}
+
 static uint8_t handle_start(const uint8_t *data, uint16_t len)
 {
     uint32_t size, crc, ver;
 
-    if (len != 12) {
+    if (len != 12U + OTA_SIG_LEN) {
         return OTA_ST_ERR_STATE;
     }
     memcpy(&size, data, 4);
@@ -88,6 +112,7 @@ static uint8_t handle_start(const uint8_t *data, uint16_t len)
     ctx.version  = ver;
     ctx.offset   = 0;
     ctx.next_seq = 1;
+    memcpy(ctx.sig, data + 12, OTA_SIG_LEN);
     return OTA_ST_OK;
 }
 
@@ -126,12 +151,19 @@ static uint8_t handle_data(uint8_t seq, const uint8_t *data, uint16_t len)
 static uint8_t handle_end(void)
 {
     ota_param_t param;
+    uint8_t     hash[32];
 
     if (!ctx.active || ctx.offset != ctx.fw_size) {
         return OTA_ST_ERR_STATE;
     }
     if (download_crc(ctx.fw_size) != ctx.fw_crc32) {
         return OTA_ST_ERR_FWCRC;
+    }
+
+    /* 数字签名验证:固件 SHA-256 必须由持有私钥者签名,否则拒绝 */
+    download_sha256(ctx.fw_size, hash);
+    if (!uECC_verify(g_ecc_pubkey, hash, sizeof(hash), ctx.sig, uECC_secp256r1())) {
+        return OTA_ST_ERR_SIGN;
     }
 
     param.magic    = OTA_MAGIC_UPDATE;
@@ -211,7 +243,7 @@ void OTA_RecvPoll(void)
 
     if (end_ok) {
         /* 传输期间不 printf(避免污染协议通道),结束后才打印 */
-        printf("\r\n[OTA] FW v%lu.%lu received: %lu bytes, CRC OK. Param saved.\r\n",
+        printf("\r\n[OTA] FW v%lu.%lu received: %lu bytes, CRC+Sign OK. Param saved.\r\n",
                (unsigned long)(ctx.version >> 16),
                (unsigned long)(ctx.version & 0xFFFF),
                (unsigned long)ctx.fw_size);

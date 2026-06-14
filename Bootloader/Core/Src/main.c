@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include "boot.h"
 #include "ota_boot.h"
+#include "ota.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -119,6 +120,7 @@ int main(void)
     /* USER CODE BEGIN 3 */
 	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
     HAL_Delay(500);
+    OTA_FEED_WDG();   /* 停留 Boot(救砖/无 App)时也喂狗,防被 App 启动的 IWDG 复位 */
   }
   /* USER CODE END 3 */
 }

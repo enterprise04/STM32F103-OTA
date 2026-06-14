@@ -19,9 +19,11 @@
 #define OTA_FRAME_OVERHEAD  10U     /* 头2 + CMD1 + SEQ1 + LEN2 + CRC4 */
 
 /* CMD */
-#define OTA_CMD_START       0x01    /* DATA = fw_size(4) + fw_crc32(4) + version(4),均小端 */
+#define OTA_CMD_START       0x01    /* DATA = fw_size(4)+fw_crc32(4)+version(4)+signature(64),小端 */
 #define OTA_CMD_DATA        0x02    /* DATA = 固件分片 */
-#define OTA_CMD_END         0x03    /* DATA 空,板端校验整包 CRC 并写参数区 */
+#define OTA_CMD_END         0x03    /* DATA 空,板端校验整包 CRC、验签后写参数区 */
+
+#define OTA_SIG_LEN         64U     /* ECDSA P-256 签名长度(r||s 各 32 字节) */
 
 /* STATUS */
 #define OTA_ST_OK           0x00
@@ -30,6 +32,7 @@
 #define OTA_ST_ERR_STATE    0x03    /* 状态/参数非法(如未 START、固件超长) */
 #define OTA_ST_ERR_FLASH    0x04    /* W25Q64 操作失败 */
 #define OTA_ST_ERR_FWCRC    0x05    /* 整包固件 CRC 校验失败 */
+#define OTA_ST_ERR_SIGN     0x06    /* 数字签名验证失败(固件非法或被篡改) */
 
 /* ============ W25Q64 参数区布局(Boot 与 App 共用,每条记录独占 4K 扇区) ============ */
 #define OTA_REQ_ADDR        (W25_PART_PARAM + 0x0000)   /* 升级请求(App 在 END 时写) */
@@ -54,5 +57,11 @@ typedef struct {
     uint32_t session;   /* 升级会话标识(=新固件 CRC32):断电重来时凭它跳过重复备份,
                            防止把已半擦除的 App 区再备份一遍冲掉好备份 */
 } ota_backup_t;
+
+/* ============ 硬件看门狗喂狗(IWDG)============
+ * 裸寄存器写"重装"命令,App/Boot 通用。IWDG 由 App 经 CubeMX(MX_IWDG_Init)启动;
+ * 一旦启动,任何复位都不会停止它,故 Boot 在备份/搬运等耗时操作中也必须续命。
+ * 对未启动的 IWDG 写此寄存器无副作用。 */
+#define OTA_FEED_WDG()   do { IWDG->KR = 0x0000AAAAU; } while (0)
 
 #endif /* __OTA_H */

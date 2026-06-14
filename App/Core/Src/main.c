@@ -20,6 +20,7 @@
 #include "main.h"
 #include "dma.h"
 #include "i2c.h"
+#include "iwdg.h"
 #include "spi.h"
 #include "usart.h"
 #include "gpio.h"
@@ -31,6 +32,7 @@
 #include "w25q64.h"
 #include "ota_recv.h"
 #include "app_version.h"
+#include "ota.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,7 +42,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+/* 看门狗回滚演示开关:去掉下一行的 // = 编成“卡死坏固件”,演示完再加回 // */
+//#define SIMULATE_HANG
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -51,7 +54,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-/* 固件信息块:版本唯一来源,上位机从 bin 中按魔数扫描读取 */
+/* 固件信息�?:版本唯一来源,上位机从 bin 中按魔数扫描读取 */
 const volatile fw_info_t g_fw_info = { FW_INFO_MAGIC0, FW_INFO_MAGIC1, APP_VERSION_WORD };
 /* USER CODE END PV */
 
@@ -99,6 +102,7 @@ int main(void)
   MX_I2C1_Init();
   MX_SPI1_Init();
   MX_USART1_UART_Init();
+  MX_IWDG_Init();
   /* USER CODE BEGIN 2 */
   printf("\r\n[App] Firmware v%lu.%lu running.\r\n",
          (unsigned long)(g_fw_info.version >> 16),
@@ -109,7 +113,14 @@ int main(void)
     Error_Handler();
   }
   OTA_RecvInit();
-  OTA_ConfirmBoot();    /* 跑到这里说明新固件启动成功,擦除试运行标志 */
+
+#ifdef SIMULATE_HANG
+  /* 演示用坏固件:卡死且不喂狗 �? IWDG 超时复位 �? Boot �?测未确认 �? 回滚 */
+  printf("[App] !! SIMULATE_HANG: dead loop, not feeding watchdog !!\r\n");
+  while (1) { }
+#endif
+
+  OTA_ConfirmBoot();    /* 跑到这里说明新固件启动成�?,擦除试运行标�? */
   printf("[App] OTA receiver ready.\r\n");
   /* USER CODE END 2 */
 
@@ -119,6 +130,7 @@ int main(void)
   while (1)
   {
     OTA_RecvPoll();
+    OTA_FEED_WDG();           /* 正常运行持续喂狗;卡死则喂不到,触发 IWDG 复位 */
     if (HAL_GetTick() - led_tick >= 100) {
       led_tick = HAL_GetTick();
       HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
@@ -142,10 +154,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.LSIState = RCC_LSI_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
